@@ -21,6 +21,7 @@ const corsHeaders = {
 	'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 	'Access-Control-Allow-Headers': 'Content-Type',
 };
+
 const routes = {
 	'/api/credential': credential,
 	'/api/refresh': refresh,
@@ -34,6 +35,7 @@ const routes = {
 	'/api/singer': singer,
 	'/api/top': top,
 };
+
 const loginHtml = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -84,6 +86,7 @@ document.getElementById('form').onsubmit = async (e) => {
 </script>
 </body>
 </html>`;
+
 async function getAdminHtml(env) {
 	let dbStatus = '❌ 未绑定';
 	let credentialStatus = env.INITIAL_CREDENTIAL ? '✅ 已设置' : '❌ 未设置';
@@ -252,7 +255,6 @@ async function logout(){
     document.cookie = "admin_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
     document.cookie = "admin_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=" + window.location.pathname + ";";
 
-    // 退出后自动跳回根路径 /（此时未登录，直接显示登录页）
     window.location.replace("/?t=" + Date.now());
 }
 
@@ -289,6 +291,7 @@ async function updateCredential(){
 </body>
 </html>`;
 }
+
 function isAuthenticated(request, env) {
 	if (!env.ADMIN_PASSWORD) {
 		return true;
@@ -300,6 +303,7 @@ function isAuthenticated(request, env) {
 	}
 	return false;
 }
+
 export default {
 	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
