@@ -146,9 +146,6 @@ async function getAdminHtml(env) {
         .m{background:#31c27c;color:#000;padding:2px 8px;border-radius:4px;font-size:.75rem;font-weight:600}
         .p{font-family:monospace;color:#4facfe}
         .d{color:#999;font-size:.9rem;margin-bottom:12px}
-        table{width:100%;border-collapse:collapse;font-size:.85rem}
-        th{text-align:left;color:#666;font-weight:500;padding:6px 0}
-        td{padding:6px 0;border-top:1px solid #333}
         .top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
         .logout-btn{background:#333;color:#ff4444;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.85rem}
         .logout-btn:hover{background:#444}
@@ -173,16 +170,16 @@ async function getAdminHtml(env) {
     </div>
     <p class="s">基于 Cloudflare Workers + D1 的双平台音乐 API 服务（QQ音乐 + 网易云）</p>
 
-    <h2>数据库与 QQ 凭证管理</h2>
+    <h2>数据库与凭证管理</h2>
     <div class="status-box">
         <div class="status-row"><span class="label">D1 数据库绑定</span><span class="value">${dbStatus}</span></div>
-        <div class="status-row"><span class="label">INITIAL_CREDENTIAL 变量</span><span class="value">${credentialStatus}</span></div>
+        <div class="status-row"><span class="label">凭证环境变量</span><span class="value">${credentialStatus}</span></div>
         <div class="status-row"><span class="label">当前生效 QQ 号</span><span class="value">${currentMusicId}</span></div>
         <div class="status-row" style="border-top:1px solid #333; margin-top:8px; padding-top:8px;"><span class="label">状态说明</span><span class="value" style="color:#aaa">${initResult}</span></div>
 
         <div style="margin-top: 20px;">
-            <label style="font-size:0.9rem; color:#aaa;">在线更新 QQ 凭证 JSON：</label>
-            <textarea id="credJson" placeholder="在此粘贴新的 QQ 凭证 JSON 数据..."></textarea>
+            <label style="font-size:0.9rem; color:#aaa;">在线更新凭证 JSON：</label>
+            <textarea id="credJson" placeholder="在此粘贴新的凭证 JSON 数据..."></textarea>
             <button class="update-btn" onclick="updateCredential()">保存并更新凭证</button>
             <span id="msg"></span>
         </div>
@@ -190,7 +187,8 @@ async function getAdminHtml(env) {
 
     <!-- 网易云音乐 API 文档 -->
     <h2>网易云音乐 API</h2>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/search</span></div><p class="d">搜索：GET /api/netease/search?keyword=周杰伦&limit=20</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/search</span></div><p class="d">搜索：GET /api/netease/search?keywords=周杰伦&type=1&limit=30</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/cloudsearch</span></div><p class="d">云搜索：GET /api/netease/cloudsearch?keywords=周杰伦</p></div>
     <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/url</span></div><p class="d">播放链接：GET /api/netease/url?id=歌曲ID</p></div>
     <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/lyric</span></div><p class="d">歌词：GET /api/netease/lyric?id=歌曲ID</p></div>
     <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/song/detail</span></div><p class="d">歌曲详情：GET /api/netease/song/detail?ids=id1,id2</p></div>
@@ -308,13 +306,18 @@ export default {
 			}
 		}
 
-		// --- 网易云音乐 API 路由 ---
-		if (path === '/api/netease/search') {
-			const keyword = url.searchParams.get('keyword');
-			const limit = parseInt(url.searchParams.get('limit') || '20');
-			if (!keyword) return new Response(JSON.stringify({ error: '缺少 keyword 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+		// --- 网易云音乐 API 路由 (对齐标准 keywords, type, limit, offset 规范) ---
+		if (path === '/api/netease/search' || path === '/api/netease/cloudsearch') {
+			const keywords = url.searchParams.get('keywords') || url.searchParams.get('keyword') || url.searchParams.get('s');
+			const type = url.searchParams.get('type') || '1';
+			const limit = url.searchParams.get('limit') || '30';
+			const offset = url.searchParams.get('offset') || '0';
+
+			if (!keywords) {
+				return new Response(JSON.stringify({ error: '缺少 keywords 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			}
 			try {
-				const result = await searchNetEase(keyword, limit, env.MUSIC_CREDENTIALS);
+				const result = await searchNetEase({ keywords, type, limit, offset }, env.MUSIC_CREDENTIALS);
 				return new Response(JSON.stringify({ success: true, data: result }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
 			} catch (err) {
 				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
