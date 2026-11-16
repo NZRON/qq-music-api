@@ -241,7 +241,7 @@ async function getAdminHtml(env) {
     <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/singer</span></div><p class="d">获取歌手：GET /api/singer?mid=xxx</p></div>
     <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/top</span></div><p class="d">获取排行：GET /api/top</p></div>
 
-    <footer><a href="https://github.com/tooplick/qq-music-api">GitHub</a></footer>
+    <footer>QQ Music API Service</footer>
 </div>
 <script>
 async function logout(){
