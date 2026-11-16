@@ -1,5 +1,5 @@
 name = "qq-music-api"
-main = "src/index.js"
+main = "index.js"
 compatibility_date = "2026-11-15"
 
 # D1 数据库绑定
