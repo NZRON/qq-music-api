@@ -15,6 +15,7 @@ import {
 	getCredentialFromDB,
 	saveCredentialToDB,
 } from './lib/credential.js';
+import { searchNetEase, resolveNetEaseUrl, fetchNetEaseLyric } from './lib/netease.js';
 
 const corsHeaders = {
 	'Access-Control-Allow-Origin': '*',
@@ -41,7 +42,7 @@ const loginHtml = `<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 - QQ Music API</title>
+    <title>登录 - 音乐 API 服务</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0;min-height:100vh;display:flex;justify-content:center;align-items:center}
@@ -57,7 +58,7 @@ const loginHtml = `<!DOCTYPE html>
 </head>
 <body>
 <div class="box">
-    <h1>QQ Music API</h1>
+    <h1>Music API</h1>
     <p>请输入管理员密码登录后查看</p>
     <div id="err" class="err">密码错误</div>
     <form id="form">
@@ -123,7 +124,7 @@ async function getAdminHtml(env) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QQ Music API 管理与文档</title>
+    <title>Music API 管理与文档</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0;line-height:1.6}
@@ -156,18 +157,16 @@ async function getAdminHtml(env) {
         .update-btn:hover{background:#28a96b}
         #msg{margin-top:10px;font-size:0.85rem;color:#31c27c}
         footer{margin-top:50px;text-align:center;color:#444;font-size:.85rem}
-        a{color:#31c27c;text-decoration:none}
     </style>
 </head>
 <body>
 <div class="c">
     <div class="top-bar">
-        <h1>QQ Music API 管理与文档</h1>
+        <h1>Music API 管理与文档</h1>
         <button class="logout-btn" onclick="logout()">退出登录</button>
     </div>
-    <p class="s">基于 Cloudflare Workers + D1 的 QQ 音乐 API 服务</p>
+    <p class="s">基于 Cloudflare Workers + D1 的双平台音乐 API 服务（QQ音乐 + 网易云）</p>
 
-    <!-- D1 数据库状态与凭证更新面板 -->
     <h2>数据库与凭证管理</h2>
     <div class="status-box">
         <div class="status-row">
@@ -188,60 +187,41 @@ async function getAdminHtml(env) {
         </div>
 
         <div style="margin-top: 20px;">
-            <label style="font-size:0.9rem; color:#aaa;">在线更新凭证 JSON：</label>
-            <textarea id="credJson" placeholder="在此粘贴新的凭证 JSON 数据..."></textarea>
+            <label style="font-size:0.9rem; color:#aaa;">在线更新 QQ 凭证 JSON：</label>
+            <textarea id="credJson" placeholder="在此粘贴新的 QQ 凭证 JSON 数据..."></textarea>
             <button class="update-btn" onclick="updateCredential()">保存并更新凭证</button>
             <span id="msg"></span>
         </div>
     </div>
 
-    <!-- 完整 API 文档部分 -->
-    <h2>搜索</h2>
+    <!-- 网易云 API 文档 -->
+    <h2>网易云音乐 API</h2>
     <div class="e">
-        <div class="h"><span class="m">GET</span><span class="p">/api/search</span></div>
-        <p class="d">搜索歌曲、歌手、专辑或歌单</p>
-        <table>
-            <tr><th>参数</th><th>类型</th><th>说明</th></tr>
-            <tr><td><span class="pm">keyword</span><span class="r">*</span></td><td>string</td><td>搜索关键词</td></tr>
-            <tr><td><span class="pm">type</span></td><td>string</td><td>song/singer/album/playlist</td></tr>
-            <tr><td><span class="pm">num</span></td><td>int</td><td>返回数量</td></tr>
-            <tr><td><span class="pm">page</span></td><td>int</td><td>页码</td></tr>
-        </table>
-        <div class="ex">GET /api/search?keyword=周杰伦&type=song&num=20</div>
+        <div class="h"><span class="m">GET</span><span class="p">/api/netease/search</span></div>
+        <p class="d">搜索网易云音乐：GET /api/netease/search?keyword=周杰伦&limit=20</p>
+    </div>
+    <div class="e">
+        <div class="h"><span class="m">GET</span><span class="p">/api/netease/url</span></div>
+        <p class="d">获取网易云播放链接：GET /api/netease/url?id=歌曲ID</p>
+    </div>
+    <div class="e">
+        <div class="h"><span class="m">GET</span><span class="p">/api/netease/lyric</span></div>
+        <p class="d">获取网易云歌词：GET /api/netease/lyric?id=歌曲ID</p>
     </div>
 
-    <h2>歌曲</h2>
-    <div class="e">
-        <div class="h"><span class="m">GET</span><span class="p">/api/song/url</span></div>
-        <p class="d">获取歌曲播放链接</p>
-        <table>
-            <tr><th>参数</th><th>类型</th><th>说明</th></tr>
-            <tr><td><span class="pm">mid</span><span class="r">*</span></td><td>string</td><td>歌曲MID，多个用逗号分隔</td></tr>
-            <tr><td><span class="pm">quality</span></td><td>string</td><td>128/320/flac</td></tr>
-        </table>
-        <div class="ex">GET /api/song/url?mid=0039MnYb0qxYhV&quality=320</div>
-    </div>
+    <!-- QQ 音乐 API 文档 -->
+    <h2>QQ 音乐 API</h2>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/search</span></div><p class="d">搜索：GET /api/search?keyword=周杰伦&type=song&num=20</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/song/url</span></div><p class="d">播放链接：GET /api/song/url?mid=xxx&quality=320</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/song/detail</span></div><p class="d">歌曲详情：GET /api/song/detail?mid=xxx</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/song/cover</span></div><p class="d">歌曲封面：GET /api/song/cover?mid=xxx&size=300</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/lyric</span></div><p class="d">歌词：GET /api/lyric?mid=xxx</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/album</span></div><p class="d">专辑：GET /api/album?mid=xxx</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/playlist</span></div><p class="d">歌单：GET /api/playlist?id=xxx</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/singer</span></div><p class="d">歌手：GET /api/singer?mid=xxx</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/top</span></div><p class="d">排行：GET /api/top</p></div>
 
-    <div class="e">
-        <div class="h"><span class="m">GET</span><span class="p">/api/song/detail</span></div>
-        <p class="d">获取歌曲详情</p>
-        <div class="ex">GET /api/song/detail?mid=0039MnYb0qxYhV</div>
-    </div>
-
-    <div class="e">
-        <div class="h"><span class="m">GET</span><span class="p">/api/song/cover</span></div>
-        <p class="d">获取歌曲封面</p>
-        <div class="ex">GET /api/song/cover?mid=0039MnYb0qxYhV&size=300</div>
-    </div>
-
-    <h2>歌词与专辑/歌单/歌手/排行榜</h2>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/lyric</span></div><p class="d">获取歌词：GET /api/lyric?mid=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/album</span></div><p class="d">获取专辑：GET /api/album?mid=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/playlist</span></div><p class="d">获取歌单：GET /api/playlist?id=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/singer</span></div><p class="d">获取歌手：GET /api/singer?mid=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/top</span></div><p class="d">获取排行：GET /api/top</p></div>
-
-    <footer>QQ Music API Service</footer>
+    <footer>Music API Service</footer>
 </div>
 <script>
 async function logout(){
@@ -418,6 +398,42 @@ export default {
 				});
 			}
 		}
+
+		// --- 网易云音乐 API 路由拦截 ---
+		if (path === '/api/netease/search') {
+			const keyword = url.searchParams.get('keyword');
+			const limit = parseInt(url.searchParams.get('limit') || '20');
+			if (!keyword) return new Response(JSON.stringify({ error: '缺少 keyword 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			try {
+				const result = await searchNetEase(keyword, limit);
+				return new Response(JSON.stringify({ success: true, data: result }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			} catch (err) {
+				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			}
+		}
+
+		if (path === '/api/netease/url') {
+			const id = url.searchParams.get('id');
+			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			try {
+				const playUrl = await resolveNetEaseUrl(id, env.NETEASE_COOKIE);
+				return new Response(JSON.stringify({ success: true, url: playUrl }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			} catch (err) {
+				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			}
+		}
+
+		if (path === '/api/netease/lyric') {
+			const id = url.searchParams.get('id');
+			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			try {
+				const lyric = await fetchNetEaseLyric(id);
+				return new Response(JSON.stringify({ success: true, lyric }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			} catch (err) {
+				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			}
+		}
+
 		const authed = isAuthenticated(request, env);
 		if (path === '/' || path === '/index.html' || path === '/admin') {
 			if (!authed) {
