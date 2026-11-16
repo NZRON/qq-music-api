@@ -1,0 +1,20 @@
+name = "qq-music-api"
+main = "src/index.js"
+compatibility_date = "2026-11-15"
+
+# D1 数据库绑定
+[[d1_databases]]
+binding = "DB"
+database_name = "qq-music-api"
+database_id = "02b5bf2c-aa66-488f-9e07-a7b9f75488f3" 
+
+# 定时刷新凭证 (每天凌晨 3 点)
+[triggers]
+crons = ["0 3 * * *"]
+
+
+# 开启日志
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true
