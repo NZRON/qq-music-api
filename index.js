@@ -1,423 +1,205 @@
-import * as credential from './api/credential.js';
-import * as refresh from './api/refresh.js';
-import * as search from './api/search.js';
-import * as songUrl from './api/song/url.js';
-import * as songDetail from './api/song/detail.js';
-import * as cover from './api/cover.js';
-import * as lyric from './api/lyric.js';
-import * as album from './api/album.js';
-import * as playlist from './api/playlist.js';
-import * as singer from './api/singer.js';
-import * as top from './api/top.js';
-import {
-	parseCredential,
-	ensureCredentialTable,
-	getCredentialFromDB,
-	saveCredentialToDB,
-} from './lib/credential.js';
-import {
-	searchNetEase,
-	resolveNetEaseUrl,
-	fetchNetEaseLyric,
-	fetchNetEaseSongDetail,
-	fetchNetEaseAlbum,
-	fetchNetEasePlaylist,
-	fetchNetEaseSinger,
-	fetchNetEaseTopList,
-} from './lib/netease.js';
+/**
+ * NetEase Cloud Music (网易云音乐) platform plugin.
+ * 稳定版：修复网易云搜索接口，采用官方经典的网页搜索接口。
+ */
 
-const corsHeaders = {
-	'Access-Control-Allow-Origin': '*',
-	'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-	'Access-Control-Allow-Headers': 'Content-Type',
+import { createHash, createCipheriv } from 'node:crypto';
+
+const eapiKey = 'e82ckenh8dichen8';
+
+function aesEncrypt(buffer, mode, key, iv) {
+	const cipher = createCipheriv(mode, key, iv);
+	return Buffer.concat([cipher.update(buffer), cipher.final()]);
+}
+
+export function eapi(url, object) {
+	const text = typeof object === 'object' ? JSON.stringify(object) : String(object);
+	const message = `nobody${url}use${text}md5forencrypt`;
+	const digest = createHash('md5').update(message).digest('hex');
+	const data = `${url}-36cd479b6b5-${text}-36cd479b6b5-${digest}`;
+	return {
+		params: aesEncrypt(Buffer.from(data), 'aes-128-ecb', eapiKey, '')
+			.toString('hex')
+			.toUpperCase(),
+	};
+}
+
+const WY_HEADERS = {
+	'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+	'Referer': 'https://music.163.com',
+	'Origin': 'https://music.163.com',
 };
 
-const routes = {
-	'/api/credential': credential,
-	'/api/refresh': refresh,
-	'/api/search': search,
-	'/api/song/url': songUrl,
-	'/api/song/detail': songDetail,
-	'/api/song/cover': cover,
-	'/api/lyric': lyric,
-	'/api/album': album,
-	'/api/playlist': playlist,
-	'/api/singer': singer,
-	'/api/top': top,
-};
-
-const loginHtml = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 - 音乐 API 服务</title>
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0;min-height:100vh;display:flex;justify-content:center;align-items:center}
-        .box{background:#222;padding:40px;border-radius:12px;width:100%;max-width:400px;box-shadow:0 4px 20px rgba(0,0,0,0.5);text-align:center}
-        h1{font-size:1.5rem;color:#fff;margin-bottom:10px}
-        p{color:#888;font-size:0.9rem;margin-bottom:24px}
-        input{width:100%;padding:12px;margin-bottom:16px;background:#181818;border:1px solid #333;border-radius:6px;color:#fff;font-size:1rem}
-        input:focus{border-color:#31c27c;outline:none}
-        button{width:100%;padding:12px;background:#31c27c;border:none;border-radius:6px;color:#000;font-weight:600;font-size:1rem;cursor:pointer}
-        button:hover{background:#28a96b}
-        .err{color:#ff4444;font-size:0.85rem;margin-bottom:12px;display:none}
-    </style>
-</head>
-<body>
-<div class="box">
-    <h1>Music API</h1>
-    <p>请输入管理员密码登录后查看</p>
-    <div id="err" class="err">密码错误</div>
-    <form id="form">
-        <input type="password" id="pwd" placeholder="请输入密码" required autofocus>
-        <button type="submit">登录</button>
-    </form>
-</div>
-<script>
-localStorage.clear();
-sessionStorage.clear();
-
-document.getElementById('form').onsubmit = async (e) => {
-    e.preventDefault();
-    const pwd = document.getElementById('pwd').value;
-    const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: pwd })
-    });
-    if(res.ok){
-        window.location.replace('/?t=' + Date.now());
-    } else {
-        document.getElementById('err').style.display = 'block';
-    }
-};
-</script>
-</body>
-</html>`;
-
-async function getAdminHtml(env) {
-	let dbStatus = '❌ 未绑定';
-	let credentialStatus = env.INITIAL_CREDENTIAL ? '✅ 已设置' : '❌ 未设置';
-	let initResult = '⏳ 检查中...';
-	let currentMusicId = '未知';
-
-	if (env.DB) {
-		dbStatus = '✅ 已绑定';
+function formatCookie(rawEnvValue) {
+	if (!rawEnvValue) return 'os=pc; appver=8.9.70;';
+	let cookieStr = String(rawEnvValue).trim();
+	if (cookieStr.startsWith('{')) {
 		try {
-			await ensureCredentialTable(env.DB);
-			const cred = await getCredentialFromDB(env.DB);
-			if (cred && cred.musicid) {
-				initResult = '✅ 数据库已有有效凭证';
-				currentMusicId = cred.musicid;
-			} else if (env.INITIAL_CREDENTIAL) {
-				const initial = parseCredential(env.INITIAL_CREDENTIAL);
-				if (initial) {
-					await saveCredentialToDB(env.DB, initial);
-					initResult = '✅ 凭证已从环境变量初始化到数据库';
-					currentMusicId = initial.musicid;
-				}
-			} else {
-				initResult = '⚠️ 数据库为空，请在下方更新凭证';
-			}
-		} catch (err) {
-			initResult = `❌ 数据库初始化异常: ${err.message}`;
-		}
-	} else {
-		initResult = '❌ D1 数据库未绑定 (DB)';
+			const obj = JSON.parse(cookieStr);
+			const targetObj = obj.netease || obj;
+			cookieStr = Object.entries(targetObj)
+				.map(([k, v]) => `${k}=${v}`)
+				.join('; ');
+		} catch (e) {}
 	}
-
-	return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Music API 管理与文档</title>
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0;line-height:1.6}
-        .c{max-width:800px;margin:0 auto;padding:40px 20px}
-        h1{font-size:2rem;color:#fff;margin-bottom:8px}
-        .s{color:#666;margin-bottom:30px}
-        h2{font-size:1.1rem;color:#31c27c;margin:30px 0 15px;border-bottom:1px solid #333;padding-bottom:8px}
-        .e{background:#222;border-radius:8px;padding:16px;margin-bottom:16px}
-        .h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-        .m{background:#31c27c;color:#000;padding:2px 8px;border-radius:4px;font-size:.75rem;font-weight:600}
-        .p{font-family:monospace;color:#4facfe}
-        .d{color:#999;font-size:.9rem;margin-bottom:12px}
-        table{width:100%;border-collapse:collapse;font-size:.85rem}
-        th{text-align:left;color:#666;font-weight:500;padding:6px 0}
-        td{padding:6px 0;border-top:1px solid #333}
-        .top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
-        .logout-btn{background:#333;color:#ff4444;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.85rem}
-        .logout-btn:hover{background:#444}
-        .status-box{background:#222;border-radius:8px;padding:20px;margin-bottom:30px}
-        .status-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #333;font-size:0.9rem}
-        .status-row:last-child{border:none}
-        .label{color:#888}
-        .value{font-family:monospace}
-        textarea{width:100%;height:100px;background:#181818;border:1px solid #333;border-radius:6px;color:#fff;padding:10px;font-family:monospace;font-size:0.85rem;margin-top:10px;margin-bottom:10px}
-        textarea:focus{border-color:#31c27c;outline:none}
-        .update-btn{background:#31c27c;color:#000;border:none;padding:8px 16px;border-radius:6px;font-weight:600;cursor:pointer}
-        .update-btn:hover{background:#28a96b}
-        #msg{margin-top:10px;font-size:0.85rem;color:#31c27c}
-        footer{margin-top:50px;text-align:center;color:#444;font-size:.85rem}
-    </style>
-</head>
-<body>
-<div class="c">
-    <div class="top-bar">
-        <h1>Music API 管理与文档</h1>
-        <button class="logout-btn" onclick="logout()">退出登录</button>
-    </div>
-    <p class="s">基于 Cloudflare Workers + D1 的双平台音乐 API 服务（QQ音乐 + 网易云）</p>
-
-    <h2>数据库与 QQ 凭证管理</h2>
-    <div class="status-box">
-        <div class="status-row"><span class="label">D1 数据库绑定</span><span class="value">${dbStatus}</span></div>
-        <div class="status-row"><span class="label">INITIAL_CREDENTIAL 变量</span><span class="value">${credentialStatus}</span></div>
-        <div class="status-row"><span class="label">当前生效 QQ 号</span><span class="value">${currentMusicId}</span></div>
-        <div class="status-row" style="border-top:1px solid #333; margin-top:8px; padding-top:8px;"><span class="label">状态说明</span><span class="value" style="color:#aaa">${initResult}</span></div>
-
-        <div style="margin-top: 20px;">
-            <label style="font-size:0.9rem; color:#aaa;">在线更新 QQ 凭证 JSON：</label>
-            <textarea id="credJson" placeholder="在此粘贴新的 QQ 凭证 JSON 数据..."></textarea>
-            <button class="update-btn" onclick="updateCredential()">保存并更新凭证</button>
-            <span id="msg"></span>
-        </div>
-    </div>
-
-    <!-- 网易云音乐 API 文档 -->
-    <h2>网易云音乐 API</h2>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/search</span></div><p class="d">搜索：GET /api/netease/search?keyword=周杰伦&limit=20</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/url</span></div><p class="d">播放链接：GET /api/netease/url?id=歌曲ID</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/lyric</span></div><p class="d">歌词：GET /api/netease/lyric?id=歌曲ID</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/song/detail</span></div><p class="d">歌曲详情：GET /api/netease/song/detail?ids=id1,id2</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/album</span></div><p class="d">专辑详情：GET /api/netease/album?id=专辑ID</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/playlist</span></div><p class="d">歌单详情：GET /api/netease/playlist?id=歌单ID</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/singer</span></div><p class="d">歌手热门：GET /api/netease/singer?id=歌手ID</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/top</span></div><p class="d">官方榜单：GET /api/netease/top</p></div>
-
-    <!-- QQ 音乐 API 文档 -->
-    <h2>QQ 音乐 API</h2>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/search</span></div><p class="d">搜索：GET /api/search?keyword=周杰伦&type=song&num=20</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/song/url</span></div><p class="d">播放链接：GET /api/song/url?mid=xxx&quality=320</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/song/detail</span></div><p class="d">歌曲详情：GET /api/song/detail?mid=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/song/cover</span></div><p class="d">歌曲封面：GET /api/song/cover?mid=xxx&size=300</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/lyric</span></div><p class="d">歌词：GET /api/lyric?mid=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/album</span></div><p class="d">专辑：GET /api/album?mid=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/playlist</span></div><p class="d">歌单：GET /api/playlist?id=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/singer</span></div><p class="d">歌手：GET /api/singer?mid=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/top</span></div><p class="d">排行：GET /api/top</p></div>
-
-    <footer>Music API Service</footer>
-</div>
-<script>
-async function logout(){
-    try { await fetch('/api/logout', { method: 'POST' }); } catch(e) {}
-    localStorage.clear(); sessionStorage.clear();
-    document.cookie = "admin_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-    window.location.replace("/?t=" + Date.now());
+	if (!cookieStr.includes('os=pc')) {
+		cookieStr = `os=pc; ${cookieStr}`;
+	}
+	return cookieStr;
 }
 
-async function updateCredential(){
-    const text = document.getElementById('credJson').value.trim();
-    const msg = document.getElementById('msg');
-    if(!text){ msg.style.color = '#ff4444'; msg.innerText = '请先输入凭证 JSON 内容'; return; }
-    try {
-        const data = JSON.parse(text);
-        const res = await fetch('/api/admin/credential', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        const json = await res.json();
-        if(res.ok){
-            msg.style.color = '#31c27c';
-            msg.innerText = '✅ 凭证更新成功！页面即将刷新...';
-            setTimeout(() => location.reload(), 1500);
-        } else {
-            msg.style.color = '#ff4444';
-            msg.innerText = '❌ 更新失败: ' + (json.error || '未知错误');
-        }
-    } catch(e){
-        msg.style.color = '#ff4444';
-        msg.innerText = '❌ JSON 格式错误，请检查输入';
-    }
-}
-</script>
-</body>
-</html>`;
-}
+// 1. 修复后的网易云搜索（采用稳定可靠的经典搜索接口）
+export async function searchNetEase(keyword, limit = 20, envCredential) {
+	const cookie = formatCookie(envCredential);
+	const url = `https://music.163.com/api/search/get?s=${encodeURIComponent(keyword)}&type=1&limit=${limit}&offset=0`;
+	
+	const res = await fetch(url, {
+		method: 'GET',
+		headers: {
+			...WY_HEADERS,
+			'Cookie': cookie,
+		},
+		signal: AbortSignal.timeout(10000),
+	});
 
-function isAuthenticated(request, env) {
-	if (!env.ADMIN_PASSWORD) return true;
-	const cookieHeader = request.headers.get('Cookie') || '';
-	const match = cookieHeader.match(/admin_token=([^;]+)/);
-	return match && match[1] === env.ADMIN_PASSWORD;
+	if (!res.ok) throw new Error(`网易云音乐搜索失败: HTTP ${res.status}`);
+	const json = await res.json();
+	if (json.code !== 200) throw new Error(`网易云音乐搜索接口异常: code=${json.code}`);
+	
+	const songs = json.result?.songs ?? [];
+	return songs.map((s) => {
+		const artists = s.artists || s.ar || [];
+		const album = s.album || s.al || {};
+		return {
+			id: s.id,
+			name: s.name,
+			artist: artists.map((a) => a.name).join('、') ?? '未知',
+			album: album.name ?? '',
+			albumId: album.id ?? 0,
+			duration: Math.round((s.duration || s.dt || 0) / 1000),
+			cover: album.picUrl ?? '',
+		};
+	});
 }
 
-export default {
-	async fetch(request, env, ctx) {
-		const url = new URL(request.url);
-		const path = url.pathname;
-		if (request.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
-
-		if (path === '/api/logout') {
-			return new Response(JSON.stringify({ success: true }), {
-				headers: {
-					'Content-Type': 'application/json',
-					'Set-Cookie': 'admin_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; Secure; SameSite=Strict',
-					...corsHeaders,
-				},
-			});
-		}
-
-		if (path === '/api/login' && request.method === 'POST') {
-			try {
-				const body = await request.json();
-				if (env.ADMIN_PASSWORD && body.password === env.ADMIN_PASSWORD) {
-					return new Response(JSON.stringify({ success: true }), {
-						headers: {
-							'Content-Type': 'application/json',
-							'Set-Cookie': `admin_token=${env.ADMIN_PASSWORD}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=2592000`,
-							...corsHeaders,
-						},
-					});
-				}
-			} catch (e) {}
-			return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-		}
-
-		if (path === '/api/admin/credential' && request.method === 'POST') {
-			if (!isAuthenticated(request, env)) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			if (!env.DB) return new Response(JSON.stringify({ error: 'D1 database not bound' }), { status: 503, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const body = await request.json();
-				const credentialData = body.credential || body;
-				if (!credentialData.musicid || !credentialData.musickey) {
-					return new Response(JSON.stringify({ error: '缺少 musicid 或 musickey' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-				}
-				await ensureCredentialTable(env.DB);
-				const credential = parseCredential(JSON.stringify(credentialData));
-				await saveCredentialToDB(env.DB, credential);
-				return new Response(JSON.stringify({ success: true, message: '凭证已更新' }), { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+// 2. 播放链接解析 (支持 VIP/高清缓存)
+export async function resolveNetEaseUrl(songId, envCredential) {
+	const formattedCookie = formatCookie(envCredential);
+	if (envCredential) {
+		try {
+			const url = `https://music.163.com/api/song/enhance/player/url/v1?ids=${encodeURIComponent(`[${songId}]`)}&level=exhigh&encodeType=mp3`;
+			const res = await fetch(url, { headers: { ...WY_HEADERS, Cookie: formattedCookie }, signal: AbortSignal.timeout(8000) });
+			if (res.ok) {
+				const json = await res.json();
+				const item = json.data?.[0];
+				if (item?.url) return item.url;
 			}
+		} catch (e) {}
+	}
+	// 备用：Meting 镜像源
+	try {
+		const metingUrl = `https://api.injahow.cn/meting/?type=url&server=netease&id=${encodeURIComponent(String(songId))}`;
+		const res = await fetch(metingUrl, { method: 'GET', redirect: 'manual', headers: { 'User-Agent': WY_HEADERS['User-Agent'] }, signal: AbortSignal.timeout(8000) });
+		if (res.status === 302 || res.status === 301) {
+			const loc = res.headers.get('location');
+			if (loc && loc.startsWith('http')) return loc;
 		}
+	} catch (e) {}
+	throw new Error(`网易云音乐无法解析播放链接 (songId=${songId})`);
+}
 
-		// --- 网易云音乐 API 路由 ---
-		if (path === '/api/netease/search') {
-			const keyword = url.searchParams.get('keyword');
-			const limit = parseInt(url.searchParams.get('limit') || '20');
-			if (!keyword) return new Response(JSON.stringify({ error: '缺少 keyword 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const result = await searchNetEase(keyword, limit, env.MUSIC_CREDENTIALS);
-				return new Response(JSON.stringify({ success: true, data: result }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
+// 3. 歌词
+export async function fetchNetEaseLyric(songId) {
+	const url = `https://music.163.com/api/song/lyric?id=${encodeURIComponent(String(songId))}&lv=1&kv=1&tv=-1`;
+	const res = await fetch(url, { headers: WY_HEADERS, signal: AbortSignal.timeout(8000) });
+	if (!res.ok) throw new Error(`网易云歌词获取失败: HTTP ${res.status}`);
+	const json = await res.json();
+	if (!json.lrc?.lyric) throw new Error(`网易云未返回歌词`);
+	return json.lrc.lyric;
+}
 
-		if (path === '/api/netease/url') {
-			const id = url.searchParams.get('id');
-			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const playUrl = await resolveNetEaseUrl(id, env.MUSIC_CREDENTIALS);
-				return new Response(JSON.stringify({ success: true, url: playUrl }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
+// 4. 歌曲详情
+export async function fetchNetEaseSongDetail(songIds) {
+	const ids = Array.isArray(songIds) ? songIds : songIds.split(',');
+	const url = `https://music.163.com/api/v3/song/detail?c=${encodeURIComponent(JSON.stringify(ids.map(id => ({ id: Number(id) }))))}`;
+	const res = await fetch(url, { headers: WY_HEADERS, signal: AbortSignal.timeout(8000) });
+	if (!res.ok) throw new Error(`获取歌曲详情失败`);
+	const json = await res.json();
+	return (json.songs ?? []).map(s => ({
+		id: s.id,
+		name: s.name,
+		artist: s.ar?.map(a => a.name).join('、') ?? '',
+		album: s.al?.name ?? '',
+		albumId: s.al?.id ?? 0,
+		duration: Math.round(s.dt / 1000),
+		cover: s.al?.picUrl ?? ''
+	}));
+}
 
-		if (path === '/api/netease/lyric') {
-			const id = url.searchParams.get('id');
-			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const lyric = await fetchNetEaseLyric(id);
-				return new Response(JSON.stringify({ success: true, lyric }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
+// 5. 专辑详情
+export async function fetchNetEaseAlbum(albumId) {
+	const url = `https://music.163.com/api/v1/album/${albumId}`;
+	const res = await fetch(url, { headers: WY_HEADERS, signal: AbortSignal.timeout(8000) });
+	if (!res.ok) throw new Error(`获取专辑详情失败`);
+	const json = await res.json();
+	const album = json.album || {};
+	const songs = (json.songs || []).map(s => ({
+		id: s.id,
+		name: s.name,
+		artist: s.ar?.map(a => a.name).join('、') ?? '',
+		album: album.name,
+		duration: Math.round(s.dt / 1000),
+		cover: album.picUrl ?? ''
+	}));
+	return { album: { id: album.id, name: album.name, artist: album.artist?.name, cover: album.picUrl, publishTime: album.publishTime }, songs };
+}
 
-		if (path === '/api/netease/song/detail') {
-			const ids = url.searchParams.get('ids');
-			if (!ids) return new Response(JSON.stringify({ error: '缺少 ids 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const data = await fetchNetEaseSongDetail(ids);
-				return new Response(JSON.stringify({ success: true, data }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
+// 6. 歌单详情
+export async function fetchNetEasePlaylist(playlistId) {
+	const url = `https://music.163.com/api/v3/playlist/detail?id=${playlistId}`;
+	const res = await fetch(url, { headers: WY_HEADERS, signal: AbortSignal.timeout(8000) });
+	if (!res.ok) throw new Error(`获取歌单详情失败`);
+	const json = await res.json();
+	const pl = json.playlist || {};
+	const tracks = (pl.tracks || []).map(s => ({
+		id: s.id,
+		name: s.name,
+		artist: s.ar?.map(a => a.name).join('、') ?? '',
+		album: s.al?.name ?? '',
+		duration: Math.round(s.dt / 1000),
+		cover: s.al?.picUrl ?? ''
+	}));
+	return { playlist: { id: pl.id, name: pl.name, description: pl.description, cover: pl.coverImgUrl, playCount: pl.playCount }, songs: tracks };
+}
 
-		if (path === '/api/netease/album') {
-			const id = url.searchParams.get('id');
-			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const data = await fetchNetEaseAlbum(id);
-				return new Response(JSON.stringify({ success: true, ...data }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
+// 7. 歌手详情与热门歌曲
+export async function fetchNetEaseSinger(artistId) {
+	const url = `https://music.163.com/api/v1/artist/${artistId}`;
+	const res = await fetch(url, { headers: WY_HEADERS, signal: AbortSignal.timeout(8000) });
+	if (!res.ok) throw new Error(`获取歌手详情失败`);
+	const json = await res.json();
+	const artist = json.artist || {};
+	const hotSongs = (json.hotSongs || []).map(s => ({
+		id: s.id,
+		name: s.name,
+		artist: artist.name,
+		album: s.al?.name ?? '',
+		duration: Math.round(s.dt / 1000),
+		cover: s.al?.picUrl ?? ''
+	}));
+	return { artist: { id: artist.id, name: artist.name, cover: artist.picUrl, musicSize: artist.musicSize, albumSize: artist.albumSize }, hotSongs };
+}
 
-		if (path === '/api/netease/playlist') {
-			const id = url.searchParams.get('id');
-			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const data = await fetchNetEasePlaylist(id);
-				return new Response(JSON.stringify({ success: true, ...data }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
-
-		if (path === '/api/netease/singer') {
-			const id = url.searchParams.get('id');
-			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const data = await fetchNetEaseSinger(id);
-				return new Response(JSON.stringify({ success: true, ...data }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
-
-		if (path === '/api/netease/top') {
-			try {
-				const data = await fetchNetEaseTopList();
-				return new Response(JSON.stringify({ success: true, data }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
-
-		// --- 页面与 QQ 音乐路由 ---
-		const authed = isAuthenticated(request, env);
-		if (path === '/' || path === '/index.html' || path === '/admin') {
-			if (!authed) {
-				return new Response(loginHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders } });
-			}
-			const html = await getAdminHtml(env);
-			return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders } });
-		}
-
-		if (path.startsWith('/api/') && !authed) {
-			return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-		}
-
-		const handler = routes[path];
-		if (handler && handler.onRequest) {
-			return handler.onRequest({ request, env, ctx });
-		}
-
-		return new Response(JSON.stringify({ error: 'Not Found' }), { status: 404, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-	},
-	async scheduled(event, env, ctx) {
-		await refresh.onSchedule({ env, ctx });
-	},
-};
+// 8. 官方排行榜
+export async function fetchNetEaseTopList() {
+	const url = `https://music.163.com/api/toplist`;
+	const res = await fetch(url, { headers: WY_HEADERS, signal: AbortSignal.timeout(8000) });
+	if (!res.ok) throw new Error(`获取排行榜失败`);
+	const json = await res.json();
+	return (json.list || []).map(item => ({
+		id: item.id,
+		name: item.name,
+		cover: item.coverImgUrl,
+		updateFrequency: item.updateFrequency
+	}));
+}
