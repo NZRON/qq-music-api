@@ -15,16 +15,6 @@ import {
 	getCredentialFromDB,
 	saveCredentialToDB,
 } from './lib/credential.js';
-import {
-	searchNetEase,
-	resolveNetEaseUrl,
-	fetchNetEaseLyric,
-	fetchNetEaseSongDetail,
-	fetchNetEaseAlbum,
-	fetchNetEasePlaylist,
-	fetchNetEaseSinger,
-	fetchNetEaseTopList,
-} from './lib/netease.js';
 
 const corsHeaders = {
 	'Access-Control-Allow-Origin': '*',
@@ -51,7 +41,7 @@ const loginHtml = `<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 - 音乐 API 服务</title>
+    <title>登录 - QQ Music API</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0;min-height:100vh;display:flex;justify-content:center;align-items:center}
@@ -67,7 +57,7 @@ const loginHtml = `<!DOCTYPE html>
 </head>
 <body>
 <div class="box">
-    <h1>Music API</h1>
+    <h1>QQ Music API</h1>
     <p>请输入管理员密码登录后查看</p>
     <div id="err" class="err">密码错误</div>
     <form id="form">
@@ -133,7 +123,7 @@ async function getAdminHtml(env) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Music API 管理与文档</title>
+    <title>QQ Music API 管理与文档</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,sans-serif;background:#1a1a1a;color:#e0e0e0;line-height:1.6}
@@ -146,6 +136,12 @@ async function getAdminHtml(env) {
         .m{background:#31c27c;color:#000;padding:2px 8px;border-radius:4px;font-size:.75rem;font-weight:600}
         .p{font-family:monospace;color:#4facfe}
         .d{color:#999;font-size:.9rem;margin-bottom:12px}
+        table{width:100%;border-collapse:collapse;font-size:.85rem}
+        th{text-align:left;color:#666;font-weight:500;padding:6px 0}
+        td{padding:6px 0;border-top:1px solid #333}
+        .pm{font-family:monospace;color:#f0a020}
+        .r{color:#f44;font-size:.75rem}
+        .ex{background:#181818;padding:10px;border-radius:4px;font-family:monospace;font-size:.85rem;color:#aaa;margin-top:10px}
         .top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
         .logout-btn{background:#333;color:#ff4444;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:0.85rem}
         .logout-btn:hover{background:#444}
@@ -160,22 +156,36 @@ async function getAdminHtml(env) {
         .update-btn:hover{background:#28a96b}
         #msg{margin-top:10px;font-size:0.85rem;color:#31c27c}
         footer{margin-top:50px;text-align:center;color:#444;font-size:.85rem}
+        a{color:#31c27c;text-decoration:none}
     </style>
 </head>
 <body>
 <div class="c">
     <div class="top-bar">
-        <h1>Music API 管理与文档</h1>
+        <h1>QQ Music API 管理与文档</h1>
         <button class="logout-btn" onclick="logout()">退出登录</button>
     </div>
-    <p class="s">基于 Cloudflare Workers + D1 的双平台音乐 API 服务（QQ音乐 + 网易云）</p>
+    <p class="s">基于 Cloudflare Workers + D1 的 QQ 音乐 API 服务</p>
 
+    <!-- D1 数据库状态与凭证更新面板 -->
     <h2>数据库与凭证管理</h2>
     <div class="status-box">
-        <div class="status-row"><span class="label">D1 数据库绑定</span><span class="value">${dbStatus}</span></div>
-        <div class="status-row"><span class="label">凭证环境变量</span><span class="value">${credentialStatus}</span></div>
-        <div class="status-row"><span class="label">当前生效 QQ 号</span><span class="value">${currentMusicId}</span></div>
-        <div class="status-row" style="border-top:1px solid #333; margin-top:8px; padding-top:8px;"><span class="label">状态说明</span><span class="value" style="color:#aaa">${initResult}</span></div>
+        <div class="status-row">
+            <span class="label">D1 数据库绑定</span>
+            <span class="value">${dbStatus}</span>
+        </div>
+        <div class="status-row">
+            <span class="label">INITIAL_CREDENTIAL 变量</span>
+            <span class="value">${credentialStatus}</span>
+        </div>
+        <div class="status-row">
+            <span class="label">当前生效 QQ 号</span>
+            <span class="value">${currentMusicId}</span>
+        </div>
+        <div class="status-row" style="border-top:1px solid #333; margin-top:8px; padding-top:8px;">
+            <span class="label">状态说明</span>
+            <span class="value" style="color:#aaa">${initResult}</span>
+        </div>
 
         <div style="margin-top: 20px;">
             <label style="font-size:0.9rem; color:#aaa;">在线更新凭证 JSON：</label>
@@ -185,44 +195,77 @@ async function getAdminHtml(env) {
         </div>
     </div>
 
-    <!-- 网易云音乐 API 文档 -->
-    <h2>网易云音乐 API</h2>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/search</span></div><p class="d">搜索：GET /api/netease/search?keywords=周杰伦&type=1&limit=30</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/cloudsearch</span></div><p class="d">云搜索：GET /api/netease/cloudsearch?keywords=周杰伦</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/url</span></div><p class="d">播放链接：GET /api/netease/url?id=歌曲ID</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/lyric</span></div><p class="d">歌词：GET /api/netease/lyric?id=歌曲ID</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/song/detail</span></div><p class="d">歌曲详情：GET /api/netease/song/detail?ids=id1,id2</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/album</span></div><p class="d">专辑详情：GET /api/netease/album?id=专辑ID</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/playlist</span></div><p class="d">歌单详情：GET /api/netease/playlist?id=歌单ID</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/singer</span></div><p class="d">歌手热门：GET /api/netease/singer?id=歌手ID</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/netease/top</span></div><p class="d">官方榜单：GET /api/netease/top</p></div>
+    <!-- 完整 API 文档部分 -->
+    <h2>搜索</h2>
+    <div class="e">
+        <div class="h"><span class="m">GET</span><span class="p">/api/search</span></div>
+        <p class="d">搜索歌曲、歌手、专辑或歌单</p>
+        <table>
+            <tr><th>参数</th><th>类型</th><th>说明</th></tr>
+            <tr><td><span class="pm">keyword</span><span class="r">*</span></td><td>string</td><td>搜索关键词</td></tr>
+            <tr><td><span class="pm">type</span></td><td>string</td><td>song/singer/album/playlist</td></tr>
+            <tr><td><span class="pm">num</span></td><td>int</td><td>返回数量</td></tr>
+            <tr><td><span class="pm">page</span></td><td>int</td><td>页码</td></tr>
+        </table>
+        <div class="ex">GET /api/search?keyword=周杰伦&type=song&num=20</div>
+    </div>
 
-    <!-- QQ 音乐 API 文档 -->
-    <h2>QQ 音乐 API</h2>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/search</span></div><p class="d">搜索：GET /api/search?keyword=周杰伦&type=song&num=20</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/song/url</span></div><p class="d">播放链接：GET /api/song/url?mid=xxx&quality=320</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/song/detail</span></div><p class="d">歌曲详情：GET /api/song/detail?mid=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/song/cover</span></div><p class="d">歌曲封面：GET /api/song/cover?mid=xxx&size=300</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/lyric</span></div><p class="d">歌词：GET /api/lyric?mid=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/album</span></div><p class="d">专辑：GET /api/album?mid=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/playlist</span></div><p class="d">歌单：GET /api/playlist?id=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/singer</span></div><p class="d">歌手：GET /api/singer?mid=xxx</p></div>
-    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/top</span></div><p class="d">排行：GET /api/top</p></div>
+    <h2>歌曲</h2>
+    <div class="e">
+        <div class="h"><span class="m">GET</span><span class="p">/api/song/url</span></div>
+        <p class="d">获取歌曲播放链接</p>
+        <table>
+            <tr><th>参数</th><th>类型</th><th>说明</th></tr>
+            <tr><td><span class="pm">mid</span><span class="r">*</span></td><td>string</td><td>歌曲MID，多个用逗号分隔</td></tr>
+            <tr><td><span class="pm">quality</span></td><td>string</td><td>128/320/flac</td></tr>
+        </table>
+        <div class="ex">GET /api/song/url?mid=0039MnYb0qxYhV&quality=320</div>
+    </div>
 
-    <footer>Music API Service</footer>
+    <div class="e">
+        <div class="h"><span class="m">GET</span><span class="p">/api/song/detail</span></div>
+        <p class="d">获取歌曲详情</p>
+        <div class="ex">GET /api/song/detail?mid=0039MnYb0qxYhV</div>
+    </div>
+
+    <div class="e">
+        <div class="h"><span class="m">GET</span><span class="p">/api/song/cover</span></div>
+        <p class="d">获取歌曲封面</p>
+        <div class="ex">GET /api/song/cover?mid=0039MnYb0qxYhV&size=300</div>
+    </div>
+
+    <h2>歌词与专辑/歌单/歌手/排行榜</h2>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/lyric</span></div><p class="d">获取歌词：GET /api/lyric?mid=xxx</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/album</span></div><p class="d">获取专辑：GET /api/album?mid=xxx</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/playlist</span></div><p class="d">获取歌单：GET /api/playlist?id=xxx</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/singer</span></div><p class="d">获取歌手：GET /api/singer?mid=xxx</p></div>
+    <div class="e"><div class="h"><span class="m">GET</span><span class="p">/api/top</span></div><p class="d">获取排行：GET /api/top</p></div>
+
+    <footer>QQ Music API Service</footer>
 </div>
 <script>
 async function logout(){
-    try { await fetch('/api/logout', { method: 'POST' }); } catch(e) {}
-    localStorage.clear(); sessionStorage.clear();
+    try {
+        await fetch('/api/logout', { method: 'POST' });
+    } catch(e) {}
+
+    localStorage.clear();
+    sessionStorage.clear();
+
     document.cookie = "admin_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    document.cookie = "admin_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=" + window.location.pathname + ";";
+
     window.location.replace("/?t=" + Date.now());
 }
 
 async function updateCredential(){
     const text = document.getElementById('credJson').value.trim();
     const msg = document.getElementById('msg');
-    if(!text){ msg.style.color = '#ff4444'; msg.innerText = '请先输入凭证 JSON 内容'; return; }
+    if(!text){
+        msg.style.color = '#ff4444';
+        msg.innerText = '请先输入凭证 JSON 内容';
+        return;
+    }
     try {
         const data = JSON.parse(text);
         const res = await fetch('/api/admin/credential', {
@@ -250,175 +293,187 @@ async function updateCredential(){
 }
 
 function isAuthenticated(request, env) {
-	if (!env.ADMIN_PASSWORD) return true;
+	if (!env.ADMIN_PASSWORD) {
+		return true;
+	}
 	const cookieHeader = request.headers.get('Cookie') || '';
 	const match = cookieHeader.match(/admin_token=([^;]+)/);
-	return match && match[1] === env.ADMIN_PASSWORD;
+	if (match && match[1] === env.ADMIN_PASSWORD) {
+		return true;
+	}
+	return false;
 }
 
 export default {
 	async fetch(request, env, ctx) {
 		const url = new URL(request.url);
 		const path = url.pathname;
-		if (request.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
-
+		if (request.method === 'OPTIONS') {
+			return new Response(null, { headers: corsHeaders });
+		}
 		if (path === '/api/logout') {
 			return new Response(JSON.stringify({ success: true }), {
 				headers: {
 					'Content-Type': 'application/json',
-					'Set-Cookie': 'admin_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; Secure; SameSite=Strict',
+					'Set-Cookie':
+						'admin_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; Secure; SameSite=Strict',
+					'Cache-Control': 'no-store, no-cache, must-revalidate',
 					...corsHeaders,
 				},
 			});
 		}
-
 		if (path === '/api/login' && request.method === 'POST') {
 			try {
 				const body = await request.json();
-				if (env.ADMIN_PASSWORD && body.password === env.ADMIN_PASSWORD) {
+				if (
+					env.ADMIN_PASSWORD &&
+					body.password === env.ADMIN_PASSWORD
+				) {
 					return new Response(JSON.stringify({ success: true }), {
 						headers: {
 							'Content-Type': 'application/json',
 							'Set-Cookie': `admin_token=${env.ADMIN_PASSWORD}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=2592000`,
+							'Cache-Control': 'no-store',
 							...corsHeaders,
 						},
 					});
 				}
 			} catch (e) {}
-			return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+				status: 401,
+				headers: { 'Content-Type': 'application/json', ...corsHeaders },
+			});
 		}
-
 		if (path === '/api/admin/credential' && request.method === 'POST') {
-			if (!isAuthenticated(request, env)) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			if (!env.DB) return new Response(JSON.stringify({ error: 'D1 database not bound' }), { status: 503, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			if (!isAuthenticated(request, env)) {
+				return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+					status: 401,
+					headers: {
+						'Content-Type': 'application/json',
+						...corsHeaders,
+					},
+				});
+			}
+			if (!env.DB) {
+				return new Response(
+					JSON.stringify({ error: 'D1 database not bound' }),
+					{
+						status: 503,
+						headers: {
+							'Content-Type': 'application/json',
+							...corsHeaders,
+						},
+					}
+				);
+			}
 			try {
 				const body = await request.json();
 				const credentialData = body.credential || body;
 				if (!credentialData.musicid || !credentialData.musickey) {
-					return new Response(JSON.stringify({ error: '缺少 musicid 或 musickey' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+					return new Response(
+						JSON.stringify({ error: '缺少 musicid 或 musickey' }),
+						{
+							status: 400,
+							headers: {
+								'Content-Type': 'application/json',
+								...corsHeaders,
+							},
+						}
+					);
 				}
 				await ensureCredentialTable(env.DB);
-				const credential = parseCredential(JSON.stringify(credentialData));
+				const credential = parseCredential(
+					JSON.stringify(credentialData)
+				);
+				if (!credential) {
+					return new Response(
+						JSON.stringify({ error: '凭证格式无效' }),
+						{
+							status: 400,
+							headers: {
+								'Content-Type': 'application/json',
+								...corsHeaders,
+							},
+						}
+					);
+				}
 				await saveCredentialToDB(env.DB, credential);
-				return new Response(JSON.stringify({ success: true, message: '凭证已更新' }), { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+				return new Response(
+					JSON.stringify({ success: true, message: '凭证已更新' }),
+					{
+						status: 200,
+						headers: {
+							'Content-Type': 'application/json',
+							...corsHeaders,
+						},
+					}
+				);
 			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+				return new Response(JSON.stringify({ error: err.message }), {
+					status: 500,
+					headers: {
+						'Content-Type': 'application/json',
+						...corsHeaders,
+					},
+				});
 			}
 		}
-
-		// --- 网易云音乐 API 路由 (对齐标准 keywords, type, limit, offset 规范) ---
-		if (path === '/api/netease/search' || path === '/api/netease/cloudsearch') {
-			const keywords = url.searchParams.get('keywords') || url.searchParams.get('keyword') || url.searchParams.get('s');
-			const type = url.searchParams.get('type') || '1';
-			const limit = url.searchParams.get('limit') || '30';
-			const offset = url.searchParams.get('offset') || '0';
-
-			if (!keywords) {
-				return new Response(JSON.stringify({ error: '缺少 keywords 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-			try {
-				const result = await searchNetEase({ keywords, type, limit, offset }, env.MUSIC_CREDENTIALS);
-				return new Response(JSON.stringify({ success: true, data: result }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
-
-		if (path === '/api/netease/url') {
-			const id = url.searchParams.get('id');
-			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const playUrl = await resolveNetEaseUrl(id, env.MUSIC_CREDENTIALS);
-				return new Response(JSON.stringify({ success: true, url: playUrl }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
-
-		if (path === '/api/netease/lyric') {
-			const id = url.searchParams.get('id');
-			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const lyric = await fetchNetEaseLyric(id);
-				return new Response(JSON.stringify({ success: true, lyric }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
-
-		if (path === '/api/netease/song/detail') {
-			const ids = url.searchParams.get('ids');
-			if (!ids) return new Response(JSON.stringify({ error: '缺少 ids 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const data = await fetchNetEaseSongDetail(ids);
-				return new Response(JSON.stringify({ success: true, data }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
-
-		if (path === '/api/netease/album') {
-			const id = url.searchParams.get('id');
-			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const data = await fetchNetEaseAlbum(id);
-				return new Response(JSON.stringify({ success: true, ...data }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
-
-		if (path === '/api/netease/playlist') {
-			const id = url.searchParams.get('id');
-			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const data = await fetchNetEasePlaylist(id);
-				return new Response(JSON.stringify({ success: true, ...data }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
-
-		if (path === '/api/netease/singer') {
-			const id = url.searchParams.get('id');
-			if (!id) return new Response(JSON.stringify({ error: '缺少 id 参数' }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			try {
-				const data = await fetchNetEaseSinger(id);
-				return new Response(JSON.stringify({ success: true, ...data }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
-
-		if (path === '/api/netease/top') {
-			try {
-				const data = await fetchNetEaseTopList();
-				return new Response(JSON.stringify({ success: true, data }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			} catch (err) {
-				return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
-			}
-		}
-
-		// --- 页面与 QQ 音乐路由 ---
 		const authed = isAuthenticated(request, env);
 		if (path === '/' || path === '/index.html' || path === '/admin') {
 			if (!authed) {
-				return new Response(loginHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders } });
+				return new Response(loginHtml, {
+					headers: {
+						'Content-Type': 'text/html; charset=utf-8',
+						'Cache-Control': 'no-store, no-cache, must-revalidate',
+						...corsHeaders,
+					},
+				});
 			}
 			const html = await getAdminHtml(env);
-			return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders } });
+			return new Response(html, {
+				headers: {
+					'Content-Type': 'text/html; charset=utf-8',
+					'Cache-Control':
+						'no-store, no-cache, must-revalidate, proxy-revalidate',
+					...corsHeaders,
+				},
+			});
 		}
-
+		if (path === '/login') {
+			if (authed) {
+				return Response.redirect(url.origin + '/', 302);
+			}
+			return new Response(loginHtml, {
+				headers: {
+					'Content-Type': 'text/html; charset=utf-8',
+					'Cache-Control': 'no-store, no-cache, must-revalidate',
+					...corsHeaders,
+				},
+			});
+		}
 		if (path.startsWith('/api/') && !authed) {
-			return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+			return new Response(
+				JSON.stringify({ error: 'Unauthorized, please login first' }),
+				{
+					status: 401,
+					headers: {
+						'Content-Type': 'application/json',
+						...corsHeaders,
+					},
+				}
+			);
 		}
-
 		const handler = routes[path];
 		if (handler && handler.onRequest) {
 			return handler.onRequest({ request, env, ctx });
 		}
-
-		return new Response(JSON.stringify({ error: 'Not Found' }), { status: 404, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+		return new Response(JSON.stringify({ error: 'Not Found' }), {
+			status: 404,
+			headers: {
+				'Content-Type': 'application/json',
+				...corsHeaders,
+			},
+		});
 	},
 	async scheduled(event, env, ctx) {
 		await refresh.onSchedule({ env, ctx });
